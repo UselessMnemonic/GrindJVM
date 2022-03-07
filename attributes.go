@@ -3,10 +3,10 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
-	"os"
+	"io"
 )
 
-type AttributeReader = func(*os.File, ConstantPool) (AttributeInfo, error)
+type AttributeReader = func(io.Reader, ConstantPool) (AttributeInfo, error)
 
 var AttributeReaders = make(map[string]AttributeReader)
 
@@ -19,16 +19,28 @@ type AttributeInfo interface {
 	Name() string
 }
 
-func readAttribute(file *os.File, pool ConstantPool) (attr AttributeInfo, err error) {
-	nameIndex, err := ReadU2(file)
-	length, err := ReadU4(file)
+func ReadAttributes(r io.Reader, pool ConstantPool) (attrs []AttributeInfo, err error) {
+	attributeCount, err := ReadU2(r)
+	attrs = make([]AttributeInfo, attributeCount)
+	for i := range attrs {
+		attrs[i], err = ReadAttribute(r, pool)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func ReadAttribute(r io.Reader, pool ConstantPool) (attr AttributeInfo, err error) {
+	nameIndex, err := ReadU2(r)
+	length, err := ReadU4(r)
 
 	name := pool[nameIndex].(*UTF8Constant)
 	reader, ok := AttributeReaders[name.Str]
 
 	if !ok {
 		data := make([]U1, length)
-		_, err = file.Read(data)
+		_, err = r.Read(data)
 		attr = &UnknownAttribute{
 			name.Str,
 			data,
@@ -36,7 +48,7 @@ func readAttribute(file *os.File, pool ConstantPool) (attr AttributeInfo, err er
 		return
 	}
 
-	attr, err = reader(file, pool)
+	attr, err = reader(r, pool)
 	return
 }
 
@@ -61,9 +73,9 @@ func (*ConstantValueAttribute) Name() string {
 	return "ConstantValue"
 }
 
-func readConstantValueAttribute(file *os.File, _ ConstantPool) (attr AttributeInfo, err error) {
+func readConstantValueAttribute(r io.Reader, _ ConstantPool) (attr AttributeInfo, err error) {
 	attr = new(ConstantValueAttribute)
-	err = binary.Read(file, binary.BigEndian, attr)
+	err = binary.Read(r, binary.BigEndian, attr)
 	return
 }
 
@@ -86,27 +98,27 @@ func (*CodeAttribute) Name() string {
 	return "Code"
 }
 
-func readCodeAttribute(file *os.File, pool ConstantPool) (attr AttributeInfo, err error) {
-	maxStack, err := ReadU2(file)
-	maxLocals, err := ReadU2(file)
+func readCodeAttribute(r io.Reader, pool ConstantPool) (attr AttributeInfo, err error) {
+	maxStack, err := ReadU2(r)
+	maxLocals, err := ReadU2(r)
 
-	codeLength, err := ReadU4(file)
+	codeLength, err := ReadU4(r)
 	code := make([]U1, codeLength)
-	_, err = file.Read(code)
+	_, err = r.Read(code)
 
-	exceptionTableLength, err := ReadU2(file)
+	exceptionTableLength, err := ReadU2(r)
 	exceptionTable := make([]ExceptionTableEntry, exceptionTableLength)
 	for i := range exceptionTable {
-		err = binary.Read(file, binary.BigEndian, &exceptionTable[i])
+		err = binary.Read(r, binary.BigEndian, &exceptionTable[i])
 		if err != nil {
 			return
 		}
 	}
 
-	attributesCount, err := ReadU2(file)
+	attributesCount, err := ReadU2(r)
 	attributes := make([]AttributeInfo, attributesCount)
 	for i := range attributes {
-		attributes[i], err = readAttribute(file, pool)
+		attributes[i], err = readAttribute(r, pool)
 		if err != nil {
 			return
 		}
@@ -171,12 +183,12 @@ type FullFrame struct {
 	Stack       []VerificationTypeInfo
 }
 
-func readStackMapTableAttribute(file *os.File) (attr AttributeInfo, err error) {
-	numberOfEntries, err := ReadU1(file)
+func readStackMapTableAttribute(r io.Reader) (attr AttributeInfo, err error) {
+	numberOfEntries, err := ReadU1(r)
 	table := make(StackMapTableAttribute, numberOfEntries)
 	for i := range table {
 		var frame StackMapFrame
-		frame.FrameType, err = ReadU1(file)
+		frame.FrameType, err = ReadU1(r)
 		if frame.FrameType == 255 {
 		} else if frame.FrameType > 251 {
 		} else if frame.FrameType == 251 {

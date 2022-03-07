@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"errors"
-	"os"
+	"io"
 )
 
 type U1 = uint8
@@ -16,9 +16,9 @@ type JShort = int16
 type JInt = int32
 type JLong = int64
 
-func ReadU1(file *os.File) (v U1, err error) {
+func ReadU1(r io.Reader) (v U1, err error) {
 	bytes := make([]byte, 1)
-	num, err := file.Read(bytes)
+	num, err := r.Read(bytes)
 	if err != nil {
 		return
 	}
@@ -29,9 +29,9 @@ func ReadU1(file *os.File) (v U1, err error) {
 	return
 }
 
-func ReadU2(file *os.File) (v U2, err error) {
+func ReadU2(r io.Reader) (v U2, err error) {
 	bytes := make([]byte, 2)
-	num, err := file.Read(bytes)
+	num, err := r.Read(bytes)
 	if err != nil {
 		return
 	}
@@ -43,9 +43,9 @@ func ReadU2(file *os.File) (v U2, err error) {
 	return
 }
 
-func ReadU4(file *os.File) (v U4, err error) {
+func ReadU4(r io.Reader) (v U4, err error) {
 	bytes := make([]byte, 4)
-	num, err := file.Read(bytes)
+	num, err := r.Read(bytes)
 	if err != nil {
 		return
 	}

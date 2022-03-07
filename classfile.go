@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 )
 
 type ClassFile struct {
@@ -21,56 +21,56 @@ type ClassFile struct {
 	Attributes   []AttributeInfo
 }
 
-func readClassFile(file *os.File) (classFile *ClassFile, err error) {
+func readClassFile(r io.Reader) (classFile *ClassFile, err error) {
 	classFile = new(ClassFile)
-	classFile.Magic, err = ReadU4(file)
-	classFile.MinorVersion, err = ReadU2(file)
-	classFile.MajorVersion, err = ReadU2(file)
+	classFile.Magic, err = ReadU4(r)
+	classFile.MinorVersion, err = ReadU2(r)
+	classFile.MajorVersion, err = ReadU2(r)
 
-	cpCount, err := ReadU2(file)
+	cpCount, err := ReadU2(r)
 	classFile.CPInfo = make(ConstantPool, cpCount)
 	for i := 1; i < len(classFile.CPInfo); i++ {
-		classFile.CPInfo[i], err = readConstantPool(file)
+		classFile.CPInfo[i], err = readConstantPool(r)
 		if err != nil {
 			return
 		}
 	}
 
-	classFile.AccessFlags, err = ReadU2(file)
-	classFile.ThisClass, err = ReadU2(file)
-	classFile.SuperClass, err = ReadU2(file)
+	classFile.AccessFlags, err = ReadU2(r)
+	classFile.ThisClass, err = ReadU2(r)
+	classFile.SuperClass, err = ReadU2(r)
 
-	interfacesCount, err := ReadU2(file)
+	interfacesCount, err := ReadU2(r)
 	classFile.Interfaces = make([]U2, interfacesCount)
 	for i := range classFile.Interfaces {
-		classFile.Interfaces[i], err = ReadU2(file)
+		classFile.Interfaces[i], err = ReadU2(r)
 		if err != nil {
 			return
 		}
 	}
 
-	fieldsCount, err := ReadU2(file)
+	fieldsCount, err := ReadU2(r)
 	classFile.Fields = make([]FieldInfo, fieldsCount)
 	for i := range classFile.Fields {
-		classFile.Fields[i], err = readFieldInfo(file, classFile.CPInfo)
+		classFile.Fields[i], err = readFieldInfo(r, classFile.CPInfo)
 		if err != nil {
 			return
 		}
 	}
 
-	methodsCount, err := ReadU2(file)
+	methodsCount, err := ReadU2(r)
 	classFile.Methods = make([]MethodInfo, methodsCount)
 	for i := range classFile.Methods {
-		classFile.Methods[i], err = readMethodInfo(file, classFile.CPInfo)
+		classFile.Methods[i], err = readMethodInfo(r, classFile.CPInfo)
 		if err != nil {
 			return
 		}
 	}
 
-	attributesCount, err := ReadU2(file)
+	attributesCount, err := ReadU2(r)
 	classFile.Attributes = make([]AttributeInfo, attributesCount)
 	for i := range classFile.Attributes {
-		classFile.Attributes[i], err = readAttribute(file, classFile.CPInfo)
+		classFile.Attributes[i], err = readAttribute(r, classFile.CPInfo)
 		if err != nil {
 			return
 		}
@@ -78,28 +78,28 @@ func readClassFile(file *os.File) (classFile *ClassFile, err error) {
 	return
 }
 
-func readConstantPool(file *os.File) (cpInfo PoolConstant, err error) {
-	tag, err := ReadU1(file)
+func readConstantPool(r io.Reader) (cpInfo PoolConstant, err error) {
+	tag, err := ReadU1(r)
 	switch tag {
 	case CONSTANT_Class:
 		cpInfo = new(ClassConstant)
-		err = binary.Read(file, binary.BigEndian, cpInfo)
+		err = binary.Read(r, binary.BigEndian, cpInfo)
 
 	case CONSTANT_Fieldref:
 		cpInfo = new(FieldRefConstant)
-		err = binary.Read(file, binary.BigEndian, cpInfo)
+		err = binary.Read(r, binary.BigEndian, cpInfo)
 
 	case CONSTANT_Methodref:
 		cpInfo = new(MethodRefConstant)
-		err = binary.Read(file, binary.BigEndian, cpInfo)
+		err = binary.Read(r, binary.BigEndian, cpInfo)
 
 	case CONSTANT_InterfaceMethodref:
 		cpInfo = new(InterfaceMethodRefConstant)
-		err = binary.Read(file, binary.BigEndian, cpInfo)
+		err = binary.Read(r, binary.BigEndian, cpInfo)
 
 	case CONSTANT_String:
 		cpInfo = new(StringConstant)
-		err = binary.Read(file, binary.BigEndian, cpInfo)
+		err = binary.Read(r, binary.BigEndian, cpInfo)
 
 	case CONSTANT_Integer:
 		err = errors.New(fmt.Sprintf("unsupported constant type %d\n", tag))
@@ -115,12 +115,12 @@ func readConstantPool(file *os.File) (cpInfo PoolConstant, err error) {
 
 	case CONSTANT_NameAndType:
 		cpInfo = new(NameAndTypeConstant)
-		err = binary.Read(file, binary.BigEndian, cpInfo)
+		err = binary.Read(r, binary.BigEndian, cpInfo)
 
 	case CONSTANT_Utf8:
-		length, _ := ReadU2(file)
+		length, _ := ReadU2(r)
 		bytes := make([]U1, length)
-		_, err = file.Read(bytes)
+		_, err = r.Read(bytes)
 		cpInfo = &UTF8Constant{
 			string(bytes),
 		}
@@ -149,24 +149,16 @@ func readConstantPool(file *os.File) (cpInfo PoolConstant, err error) {
 	return
 }
 
-func readMethodOrFieldInfo(file *os.File, cpInfo ConstantPool) (accessFlags, nameIndex, descriptorIndex U2, attributes []AttributeInfo, err error) {
-	accessFlags, err = ReadU2(file)
-	nameIndex, err = ReadU2(file)
-	descriptorIndex, err = ReadU2(file)
-
-	attributeCount, err := ReadU2(file)
-	attributes = make([]AttributeInfo, attributeCount)
-	for i := range attributes {
-		attributes[i], err = readAttribute(file, cpInfo)
-		if err != nil {
-			return
-		}
-	}
+func readMethodOrFieldInfo(r io.Reader, pool ConstantPool) (accessFlags, nameIndex, descriptorIndex U2, attributes []AttributeInfo, err error) {
+	accessFlags, err = ReadU2(r)
+	nameIndex, err = ReadU2(r)
+	descriptorIndex, err = ReadU2(r)
+	attributes, err = ReadAttributes(r, pool)
 	return
 }
 
-func readMethodInfo(file *os.File, pool ConstantPool) (info MethodInfo, err error) {
-	info.AccessFlags, info.NameIndex, info.DescriptorIndex, info.Attributes, err = readMethodOrFieldInfo(file, pool)
+func readMethodInfo(r io.Reader, pool ConstantPool) (info MethodInfo, err error) {
+	info.AccessFlags, info.NameIndex, info.DescriptorIndex, info.Attributes, err = readMethodOrFieldInfo(r, pool)
 	info.Name = pool[info.NameIndex].(*UTF8Constant).Str
 	info.Descriptor = pool[info.DescriptorIndex].(*UTF8Constant).Str
 	for _, attr := range info.Attributes {
@@ -178,8 +170,8 @@ func readMethodInfo(file *os.File, pool ConstantPool) (info MethodInfo, err erro
 	return
 }
 
-func readFieldInfo(file *os.File, pool ConstantPool) (info FieldInfo, err error) {
-	info.AccessFlags, info.NameIndex, info.DescriptorIndex, info.Attributes, err = readMethodOrFieldInfo(file, pool)
+func readFieldInfo(r io.Reader, pool ConstantPool) (info FieldInfo, err error) {
+	info.AccessFlags, info.NameIndex, info.DescriptorIndex, info.Attributes, err = readMethodOrFieldInfo(r, pool)
 	return
 }
 
